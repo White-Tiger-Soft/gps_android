@@ -24,7 +24,7 @@ import io.flutter.plugin.common.PluginRegistry.ActivityResultListener
 class GpsAndroidPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityResultListener {
     private lateinit var channel: MethodChannel
     private lateinit var context: Context
-    private lateinit var _result: Result
+    private var _result: Result? = null
     private var activity: Activity? = null
     private val REQUEST_CHECK_SETTINGS = 1001
 
@@ -46,6 +46,11 @@ class GpsAndroidPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, Activi
             result.error("ERROR", "Activity is null", null)
             return
         }
+        // Защита от двойного вызова
+        if (_result != null) {
+            result.error("ERROR", "Another request is already running", null)
+            return
+        }
         _result = result
         val locationRequest = LocationRequest.Builder(LocationRequest.PRIORITY_HIGH_ACCURACY, 1000).build()
         val builder = LocationSettingsRequest.Builder().addLocationRequest(locationRequest)
@@ -53,7 +58,8 @@ class GpsAndroidPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, Activi
         val task: Task<LocationSettingsResponse> = client.checkLocationSettings(builder.build())
 
         task.addOnSuccessListener {
-            result.success(true)
+            _result?.success(true)
+            _result = null
         }
 
         task.addOnFailureListener { exception ->
@@ -62,21 +68,23 @@ class GpsAndroidPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, Activi
                     activity?.let {
                         exception.startResolutionForResult(it, REQUEST_CHECK_SETTINGS)
                     } ?: run {
-                        result.error("ERROR", "Activity is null", null)
+                        _result?.error("ERROR", "Activity is null", null)
                     }
                 } catch (sendEx: IntentSender.SendIntentException) {
-                    result.error("ERROR", "Cannot start resolution for GPS", null)
+                    _result?.error("ERROR", "Cannot start resolution for GPS", null)
                 }
             } else {
-                result.error("ERROR", "GPS unavailable", null)
+                _result?.error("ERROR", "GPS unavailable", null)
             }
+            _result = null
         }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
         if (requestCode == REQUEST_CHECK_SETTINGS) {
             val isGpsEnabled = (resultCode == Activity.RESULT_OK)
-            _result.success(isGpsEnabled)
+            _result?.success(isGpsEnabled)
+            _result = null
             return true
         }
         return false
